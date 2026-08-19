@@ -10,6 +10,7 @@ import os
 
 from app.image_viewer import ImageViewer
 from app.settings_dialog import SettingsDialog, get_shortcuts, event_to_str
+from app.styles import generate_qss
 
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
@@ -61,6 +62,7 @@ class MainWindow(QMainWindow):
         self._shortcuts: list[QShortcut] = []  # 跟踪全局快捷键
 
         self._setup_ui()
+        self._apply_theme()
         self._setup_shortcuts()
 
         if start_dir:
@@ -88,10 +90,8 @@ class MainWindow(QMainWindow):
         self._dir_label.setWordWrap(True)
         dir_btn = QPushButton("  选择目录  ")
         dir_btn.clicked.connect(self._choose_directory)
-        self._settings_btn = QPushButton(" ⚙ ")
-        self._settings_btn.setFixedWidth(36)
+        self._settings_btn = QPushButton("  设置  ")
         self._settings_btn.setObjectName("navBtn")
-        self._settings_btn.setToolTip("重名文件处理设置")
         self._settings_btn.clicked.connect(self._open_settings)
         dir_row.addWidget(self._dir_label, 1)
         dir_row.addWidget(dir_btn)
@@ -483,8 +483,13 @@ class MainWindow(QMainWindow):
     def _open_settings(self):
         dlg = SettingsDialog(self)
         if dlg.exec():
-            # 设置保存后重新加载快捷键
+            self._apply_theme()
             self._setup_shortcuts()
+
+    def _apply_theme(self):
+        """从 QSettings 读取颜色并应用 QSS"""
+        qss = generate_qss(self._settings)
+        self.setStyleSheet(qss)
 
     # ── 重命名 ──────────────────────────────────────────────
 
@@ -533,13 +538,15 @@ class MainWindow(QMainWindow):
         else:
             new_name = new_base + ext
             if os.path.exists(os.path.join(self._current_dir, new_name)):
-                reply = QMessageBox.question(
-                    self,
-                    "确认覆盖",
-                    f"文件 {new_name} 已存在，是否覆盖？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                )
-                if reply != QMessageBox.StandardButton.Yes:
+                box = QMessageBox(self)
+                box.setWindowTitle("确认覆盖")
+                box.setText(f"文件 {new_name} 已存在，是否覆盖？")
+                box.setIcon(QMessageBox.Icon.Warning)
+                yes_btn = box.addButton("覆盖", QMessageBox.ButtonRole.AcceptRole)
+                box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+                box.setDefaultButton(yes_btn)
+                box.exec()
+                if box.clickedButton() != yes_btn:
                     return
 
         if new_name == old_name:
