@@ -9,6 +9,7 @@ from PyQt6.QtGui import QKeySequence, QIcon, QFont, QShortcut, QKeyEvent
 import os
 
 from app.image_viewer import ImageViewer
+from app.settings_dialog import SettingsDialog
 
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
@@ -97,8 +98,14 @@ class MainWindow(QMainWindow):
         self._dir_label.setWordWrap(True)
         dir_btn = QPushButton("  选择目录  ")
         dir_btn.clicked.connect(self._choose_directory)
+        self._settings_btn = QPushButton(" ⚙ ")
+        self._settings_btn.setFixedWidth(36)
+        self._settings_btn.setObjectName("navBtn")
+        self._settings_btn.setToolTip("重名文件处理设置")
+        self._settings_btn.clicked.connect(self._open_settings)
         dir_row.addWidget(self._dir_label, 1)
         dir_row.addWidget(dir_btn)
+        dir_row.addWidget(self._settings_btn)
         left_layout.addLayout(dir_row)
 
         # 文件列表
@@ -464,7 +471,38 @@ class MainWindow(QMainWindow):
         self._viewer.cleanup()
         super().closeEvent(event)
 
+    # ── 设置 ────────────────────────────────────────────────
+
+    def _open_settings(self):
+        dlg = SettingsDialog(self)
+        dlg.exec()
+
     # ── 重命名 ──────────────────────────────────────────────
+
+    def _find_unique_name(self, base: str, ext: str) -> str:
+        """根据设置的后缀格式，自动处理重名文件"""
+        suffix_fmt = self._settings.value("suffix_key", "-x", type=str)
+        start_num = self._settings.value("start_num", 2, type=int)
+
+        fmt_map = {
+            "-x": "-{x}",
+            ".x": ".{x}",
+            "_x": "_{x}",
+            " (x)": " ({x})",
+            "无后缀": None,
+        }
+        fmt = fmt_map.get(suffix_fmt)
+
+        # 无后缀模式：直接返回原名（由调用方决定是否覆盖）
+        if fmt is None:
+            return base + ext
+
+        candidate = base + ext
+        num = start_num
+        while os.path.exists(os.path.join(self._current_dir, candidate)):
+            candidate = base + fmt.replace("{x}", str(num)) + ext
+            num += 1
+        return candidate
 
     def _rename_file(self):
         if self._current_index < 0 or self._current_index >= len(self._image_files):
@@ -478,7 +516,7 @@ class MainWindow(QMainWindow):
             return
 
         ext = os.path.splitext(old_name)[1]
-        new_name = new_base + ext
+        new_name = self._find_unique_name(new_base, ext)
 
         if new_name == old_name:
             self._status_bar.showMessage("文件名未改变", 3000)
@@ -486,16 +524,6 @@ class MainWindow(QMainWindow):
 
         old_path = os.path.join(self._current_dir, old_name)
         new_path = os.path.join(self._current_dir, new_name)
-
-        if os.path.exists(new_path):
-            reply = QMessageBox.question(
-                self,
-                "确认覆盖",
-                f"文件 {new_name} 已存在，是否覆盖？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
 
         try:
             os.rename(old_path, new_path)

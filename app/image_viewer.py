@@ -2,7 +2,6 @@ from PyQt6.QtWidgets import QLabel, QWidget, QVBoxLayout
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QPixmap, QImage
 from PIL import Image
-from io import BytesIO
 import os
 
 
@@ -61,40 +60,48 @@ class ImageViewer(QWidget):
 
         self._current_path = path
         try:
-            with Image.open(path) as img:
-                buf = BytesIO()
-                img.save(buf, format=img.format or "JPEG")
-                buf.seek(0)
-                self._pil_image = Image.open(buf)
-                self._pil_image.load()
+            self._pil_image = Image.open(path)
+            self._pil_image.load()
             self._update_display()
         except Exception as e:
             self._label.setText(f"无法加载图片:\n{e}")
 
     def _update_display(self):
-        """根据当前PIL图片更新显示"""
+        """根据当前PIL图片更新显示，先预缩放再转 QPixmap 减少转换耗时"""
         if self._pil_image is None:
             return
 
-        # 直接从 PIL 原始像素构建 QImage，跳过额外的 convert 步骤
         img = self._pil_image
+
+        # 预缩放：如果图片远大于显示区域，先用 thumbnail 快速缩小
+        label_w, label_h = self._label.width(), self._label.height()
+        if label_w > 50 and label_h > 50:
+            max_w, max_h = label_w * 2, label_h * 2
+            if img.width > max_w or img.height > max_h:
+                thumb = img.copy()
+                thumb.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
+                img = thumb
+
+        # 转换为 RGB（QImage 不支持 palette 模式）
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGB")
+
         if img.mode == "RGBA":
             data = img.tobytes("raw", "RGBA")
             fmt = QImage.Format.Format_RGBA8888
         else:
-            if img.mode != "RGB":
-                img = img.convert("RGB")
             data = img.tobytes("raw", "RGB")
             fmt = QImage.Format.Format_RGB888
 
         qimage = QImage(data, img.width, img.height, fmt)
         pixmap = QPixmap.fromImage(qimage)
 
+        # 缩放到显示区域
         label_size = self._label.size()
         scaled = pixmap.scaled(
             label_size,
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
+            Qt.TransformationMode.FastTransformation,
         )
         self._label.setPixmap(scaled)
 
