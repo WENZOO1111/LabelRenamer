@@ -32,6 +32,43 @@ class RotateWorker(QThread):
             self.error.emit(str(e))
 
 
+class _OverlayLabel(QLabel):
+    """透明覆盖层，用于在图片上绘制选区遮罩"""
+
+    def __init__(self, parent_viewer: "ImageViewer", parent=None):
+        super().__init__(parent)
+        self._viewer = parent_viewer
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setStyleSheet("background: transparent;")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._viewer._sel_rect.isNull() or not self._viewer._developer_mode:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        sel = self._viewer._sel_rect
+
+        # 半透明遮罩（选区外）
+        painter.setBrush(QBrush(QColor(0, 0, 0, 80)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRect(self.rect())
+
+        # 清除选区内的遮罩（显示原始图片）
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        painter.drawRect(sel)
+
+        # 选区边框
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        painter.setPen(QPen(QColor("#FF4081"), 2, Qt.PenStyle.DashLine))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(sel)
+
+        painter.end()
+
+
 class ImageViewer(QWidget):
     """图片显示组件，支持缩放、旋转、开发者模式选区 OCR"""
 
@@ -64,20 +101,27 @@ class ImageViewer(QWidget):
         self._label.setObjectName("imageLabel")
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setMinimumSize(400, 300)
-        # 启用鼠标追踪以支持选区
         self._label.setMouseTracking(True)
         self._label.installEventFilter(self)
 
         layout.addWidget(self._label)
 
+        # 透明覆盖层，用于绘制选区遮罩
+        self._overlay = _OverlayLabel(self)
+        self._overlay.hide()
+
     # ── 开发者模式 ──────────────────────────────────────────
 
     def set_developer_mode(self, enabled: bool):
         self._developer_mode = enabled
-        if not enabled:
+        if enabled:
+            self._overlay.setGeometry(self._label.geometry())
+            self._overlay.show()
+            self._overlay.raise_()
+        else:
             self._sel_rect = QRect()
             self._selecting = False
-            self._label.update()
+            self._overlay.hide()
 
     # ── 图片加载 ────────────────────────────────────────────
 
@@ -152,13 +196,13 @@ class ImageViewer(QWidget):
             self._sel_start = event.position().toPoint()
             self._sel_end = self._sel_start
             self._sel_rect = QRect(self._sel_start, self._sel_end)
-            self._label.update()
+            self._overlay.update()
             return True
 
         if etype == QEvent.Type.MouseMove and self._selecting:
             self._sel_end = event.position().toPoint()
             self._sel_rect = QRect(self._sel_start, self._sel_end).normalized()
-            self._label.update()
+            self._overlay.update()
             return True
 
         if etype == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
@@ -166,7 +210,7 @@ class ImageViewer(QWidget):
                 self._selecting = False
                 self._sel_end = event.position().toPoint()
                 self._sel_rect = QRect(self._sel_start, self._sel_end).normalized()
-                self._label.update()
+                self._overlay.update()
 
                 # 选区太小则忽略
                 if self._sel_rect.width() > 5 and self._sel_rect.height() > 5:
@@ -174,33 +218,6 @@ class ImageViewer(QWidget):
                 return True
 
         return False
-
-    # ── 选区绘制 ────────────────────────────────────────────
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if self._sel_rect.isNull() or not self._developer_mode:
-            return
-
-        painter = QPainter(self._label)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # 半透明遮罩（选区外）
-        painter.setBrush(QBrush(QColor(0, 0, 0, 80)))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRect(self._label.rect())
-
-        # 清除选区内的遮罩（显示原始图片）
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-        painter.drawRect(self._sel_rect)
-
-        # 选区边框
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-        painter.setPen(QPen(QColor("#FF4081"), 2, Qt.PenStyle.DashLine))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(self._sel_rect)
-
-        painter.end()
 
     # ── OCR 识别 ────────────────────────────────────────────
 
@@ -262,6 +279,9 @@ class ImageViewer(QWidget):
         super().resizeEvent(event)
         if self._pil_image:
             self._update_display()
+        # 同步覆盖层大小
+        if self._developer_mode:
+            self._overlay.setGeometry(self._label.geometry())
 
     def cleanup(self):
         if self._rotate_worker and self._rotate_worker.isRunning():
