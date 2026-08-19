@@ -516,7 +516,22 @@ class MainWindow(QMainWindow):
             return
 
         ext = os.path.splitext(old_name)[1]
-        new_name = self._find_unique_name(new_base, ext)
+
+        # 根据开关决定重名处理方式
+        auto_enabled = self._settings.value("auto_suffix_enabled", True, type=bool)
+        if auto_enabled:
+            new_name = self._find_unique_name(new_base, ext)
+        else:
+            new_name = new_base + ext
+            if os.path.exists(os.path.join(self._current_dir, new_name)):
+                reply = QMessageBox.question(
+                    self,
+                    "确认覆盖",
+                    f"文件 {new_name} 已存在，是否覆盖？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
 
         if new_name == old_name:
             self._status_bar.showMessage("文件名未改变", 3000)

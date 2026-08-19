@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QComboBox, QSpinBox, QPushButton, QGroupBox,
+    QComboBox, QSpinBox, QPushButton, QGroupBox, QCheckBox,
 )
 from PyQt6.QtCore import QSettings
 
@@ -31,6 +31,12 @@ class SettingsDialog(QDialog):
         group = QGroupBox("重名文件自动处理")
         group_layout = QVBoxLayout(group)
 
+        # 开启/关闭
+        self._enable_check = QCheckBox("启用自动补全后缀")
+        self._enable_check.setChecked(True)
+        self._enable_check.stateChanged.connect(self._update_ui_state)
+        group_layout.addWidget(self._enable_check)
+
         # 后缀格式
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("重名后缀格式："))
@@ -59,6 +65,13 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(group)
 
+    def _update_ui_state(self):
+        """根据勾选状态启用/禁用下方选项"""
+        enabled = self._enable_check.isChecked()
+        self._suffix_combo.setEnabled(enabled)
+        self._start_spin.setEnabled(enabled)
+        self._update_preview()
+
         # 按钮
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -74,6 +87,9 @@ class SettingsDialog(QDialog):
         self._update_preview()
 
     def _update_preview(self):
+        if not self._enable_check.isChecked():
+            self._preview_label.setText("未启用：重名时弹窗确认覆盖")
+            return
         fmt_key = self._suffix_combo.currentText()
         start = self._start_spin.value()
         fmt = self.SUFFIX_OPTIONS[fmt_key]
@@ -85,13 +101,17 @@ class SettingsDialog(QDialog):
             self._preview_label.setText(f"示例：a1 → a1{s2} → a1{s3}")
 
     def _load_settings(self):
+        enabled = self._settings.value("auto_suffix_enabled", True, type=bool)
         suffix_key = self._settings.value("suffix_key", "-x", type=str)
         start_num = self._settings.value("start_num", 2, type=int)
+        self._enable_check.setChecked(enabled)
         idx = list(self.SUFFIX_OPTIONS.keys()).index(suffix_key) if suffix_key in self.SUFFIX_OPTIONS else 0
         self._suffix_combo.setCurrentIndex(idx)
         self._start_spin.setValue(start_num)
+        self._update_ui_state()
 
     def _save_and_close(self):
+        self._settings.setValue("auto_suffix_enabled", self._enable_check.isChecked())
         self._settings.setValue("suffix_key", self._suffix_combo.currentText())
         self._settings.setValue("start_num", self._start_spin.value())
         self.accept()
