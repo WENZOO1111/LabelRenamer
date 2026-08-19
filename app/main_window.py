@@ -9,49 +9,38 @@ from PyQt6.QtGui import QKeySequence, QIcon, QFont, QShortcut, QKeyEvent
 import os
 
 from app.image_viewer import ImageViewer
-from app.settings_dialog import SettingsDialog
+from app.settings_dialog import SettingsDialog, get_shortcuts, event_to_str
 
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
 
 
 class RenameInput(QLineEdit):
-    """自定义输入框，重写按键事件以支持 Ctrl+A 前缀、Ctrl+S 重命名、
-    Ctrl+左右切换图片、上下切换前缀"""
+    """自定义输入框，根据用户设置的快捷键处理按键"""
 
     def __init__(self, main_window: "MainWindow", parent=None):
         super().__init__(parent)
         self._mw = main_window
+        self._actions = {}  # 快捷键字符串 -> 回调函数
+
+    def set_shortcuts(self, shortcuts: dict):
+        """根据设置重建快捷键映射"""
+        self._actions = {
+            shortcuts["apply_prefix"]: self._mw._apply_prefix,
+            shortcuts["rename"]: self._mw._rename_file,
+            shortcuts["prev_image"]: self._mw._prev_image,
+            shortcuts["next_image"]: self._mw._next_image,
+            shortcuts["prev_prefix"]: self._mw._prev_prefix,
+            shortcuts["next_prefix"]: self._mw._next_prefix,
+            shortcuts["rotate_left"]: self._mw._rotate_left,
+            shortcuts["rotate_right"]: self._mw._rotate_right,
+        }
 
     def keyPressEvent(self, event: QKeyEvent):
-        key = event.key()
-        ctrl = event.modifiers() & Qt.KeyboardModifier.ControlModifier
-
-        if ctrl and key == Qt.Key.Key_A:
-            # Ctrl+A: 应用选中的惯用前缀（覆盖输入框）
-            self._mw._apply_prefix()
+        seq = event_to_str(event)
+        if seq in self._actions:
+            self._actions[seq]()
             return
-        if ctrl and key == Qt.Key.Key_S:
-            # Ctrl+S: 确认重命名
-            self._mw._rename_file()
-            return
-        if ctrl and key == Qt.Key.Key_Left:
-            # Ctrl+←: 上一张
-            self._mw._prev_image()
-            return
-        if ctrl and key == Qt.Key.Key_Right:
-            # Ctrl+→: 下一张
-            self._mw._next_image()
-            return
-        if key == Qt.Key.Key_Up:
-            # ↑: 切换上一个惯用前缀
-            self._mw._prev_prefix()
-            return
-        if key == Qt.Key.Key_Down:
-            # ↓: 切换下一个惯用前缀
-            self._mw._next_prefix()
-            return
-
         super().keyPressEvent(event)
 
 
@@ -69,6 +58,7 @@ class MainWindow(QMainWindow):
         self._settings = QSettings("ImageTool", "ImageViewer")
         self._prefixes = self._settings.value("prefixes", [], type=list)
         self._active_prefix = self._settings.value("active_prefix", "", type=str)
+        self._shortcuts: list[QShortcut] = []  # 跟踪全局快捷键
 
         self._setup_ui()
         self._setup_shortcuts()
@@ -270,14 +260,31 @@ class MainWindow(QMainWindow):
     # ── 快捷键 ──────────────────────────────────────────────
 
     def _setup_shortcuts(self):
-        # 全局快捷键（RenameInput 内部已处理输入框焦点时的按键）
-        # 这里处理输入框无焦点时的快捷键
-        ctrl_s = QShortcut(QKeySequence("Ctrl+S"), self)
-        ctrl_s.activated.connect(self._rename_file)
-        ctrl_left = QShortcut(QKeySequence("Ctrl+Left"), self)
-        ctrl_left.activated.connect(self._prev_image)
-        ctrl_right = QShortcut(QKeySequence("Ctrl+Right"), self)
-        ctrl_right.activated.connect(self._next_image)
+        # 清理旧的全局快捷键
+        for sc in self._shortcuts:
+            sc.setEnabled(False)
+            sc.deleteLater()
+        self._shortcuts.clear()
+
+        shortcuts = get_shortcuts(self._settings)
+
+        # 全局快捷键（输入框无焦点时生效）
+        for action, callback in [
+            ("rename", self._rename_file),
+            ("prev_image", self._prev_image),
+            ("next_image", self._next_image),
+            ("rotate_left", self._rotate_left),
+            ("rotate_right", self._rotate_right),
+            ("open_settings", self._open_settings),
+        ]:
+            seq = shortcuts.get(action, "")
+            if seq:
+                sc = QShortcut(QKeySequence(seq), self)
+                sc.activated.connect(callback)
+                self._shortcuts.append(sc)
+
+        # 通知 RenameInput 更新快捷键映射
+        self._rename_input.set_shortcuts(shortcuts)
 
     # ── 目录操作 ─────────────────────────────────────────────
 
@@ -475,7 +482,9 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self):
         dlg = SettingsDialog(self)
-        dlg.exec()
+        if dlg.exec():
+            # 设置保存后重新加载快捷键
+            self._setup_shortcuts()
 
     # ── 重命名 ──────────────────────────────────────────────
 
