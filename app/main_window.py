@@ -92,6 +92,7 @@ class MainWindow(QMainWindow):
         dir_btn.clicked.connect(self._choose_directory)
         self._settings_btn = QPushButton("  设置  ")
         self._settings_btn.setObjectName("navBtn")
+        self._settings_btn.setMinimumWidth(dir_btn.sizeHint().width())
         self._settings_btn.clicked.connect(self._open_settings)
         dir_row.addWidget(self._dir_label, 1)
         dir_row.addWidget(dir_btn)
