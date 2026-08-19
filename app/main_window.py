@@ -166,10 +166,10 @@ class MainWindow(QMainWindow):
         self._file_name_label.setObjectName("fileNameLabel")
         name_row.addWidget(self._file_name_label, 1)
 
-        self._check_label = QLabel("✔")
+        self._check_label = QLabel("")
         self._check_label.setObjectName("checkLabel")
         self._check_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._check_label.setStyleSheet("color: #4CAF50; font-size: 22px; font-weight: bold; background: transparent;")
+        self._check_label.setStyleSheet("color: #4CAF50; font-size: 14px; font-weight: bold; background: transparent;")
         self._check_label.hide()
         name_row.addWidget(self._check_label)
         right_layout.addLayout(name_row)
@@ -177,6 +177,7 @@ class MainWindow(QMainWindow):
         # 图片查看器
         self._viewer = ImageViewer()
         self._viewer.setMinimumHeight(400)
+        self._viewer.image_rotated.connect(self._on_image_rotated)
         right_layout.addWidget(self._viewer, 1)
 
         # --- 旋转控制行 ---
@@ -186,10 +187,12 @@ class MainWindow(QMainWindow):
         rotate_left_btn = QPushButton("  ↩  向左旋转 90°")
         rotate_left_btn.setObjectName("rotateBtn")
         rotate_left_btn.clicked.connect(self._rotate_left)
+        self._rotate_left_btn = rotate_left_btn
 
         rotate_right_btn = QPushButton("  向右旋转 90°  ↪ ")
         rotate_right_btn.setObjectName("rotateBtn")
         rotate_right_btn.clicked.connect(self._rotate_right)
+        self._rotate_right_btn = rotate_right_btn
 
         rotate_row.addStretch()
         rotate_row.addWidget(rotate_left_btn)
@@ -352,12 +355,27 @@ class MainWindow(QMainWindow):
     # ── 旋转 ────────────────────────────────────────────────
 
     def _rotate_left(self):
+        self._rotate_left_btn.setEnabled(False)
+        self._rotate_right_btn.setEnabled(False)
+        self._status_bar.showMessage("旋转中…")
         self._viewer.rotate_left()
-        self._status_bar.showMessage("已向左旋转 90° 并保存", 3000)
 
     def _rotate_right(self):
+        self._rotate_left_btn.setEnabled(False)
+        self._rotate_right_btn.setEnabled(False)
+        self._status_bar.showMessage("旋转中…")
         self._viewer.rotate_right()
-        self._status_bar.showMessage("已向右旋转 90° 并保存", 3000)
+
+    def _on_image_rotated(self, path: str):
+        """旋转后台线程完成后的回调"""
+        self._rotate_left_btn.setEnabled(True)
+        self._rotate_right_btn.setEnabled(True)
+        fname = os.path.basename(path)
+        name_no_ext = os.path.splitext(fname)[0]
+        self._check_label.setText(f"{name_no_ext} 已保存 ✔")
+        self._check_label.show()
+        QTimer.singleShot(2000, self._check_label.hide)
+        self._status_bar.showMessage("旋转并保存完成", 3000)
 
     # ── 惯用前缀 ─────────────────────────────────────────────
 
@@ -434,10 +452,17 @@ class MainWindow(QMainWindow):
         new_row = row + 1 if row < len(self._prefixes) - 1 else 0
         self._prefix_list.setCurrentRow(new_row)
 
-    def _show_checkmark(self):
-        """显示成功对勾，1.5秒后自动隐藏"""
+    def _show_checkmark(self, filename: str):
+        """显示成功对勾：文件名 + 已保存 + √"""
+        name_no_ext = os.path.splitext(filename)[0]
+        self._check_label.setText(f"{name_no_ext} 已保存 ✔")
         self._check_label.show()
-        QTimer.singleShot(1500, self._check_label.hide)
+        QTimer.singleShot(2000, self._check_label.hide)
+
+    def closeEvent(self, event):
+        """关闭窗口时清理后台线程"""
+        self._viewer.cleanup()
+        super().closeEvent(event)
 
     # ── 重命名 ──────────────────────────────────────────────
 
@@ -483,5 +508,5 @@ class MainWindow(QMainWindow):
         self._file_list.item(self._current_index).setText(new_name)
         self._file_name_label.setText(new_name)
 
-        self._show_checkmark()
+        self._show_checkmark(new_name)
         self._status_bar.showMessage(f"已重命名: {old_name} → {new_name}", 3000)
