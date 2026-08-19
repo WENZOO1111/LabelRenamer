@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QSpinBox, QPushButton, QGroupBox, QCheckBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget,
-    QWidget, QColorDialog, QScrollArea, QFrame,
+    QWidget, QColorDialog, QScrollArea, QFrame, QFileDialog,
 )
 from PyQt6.QtCore import Qt, QSettings, QRect, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QColor, QPainter, QPen, QFont, QBrush
@@ -479,6 +479,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_duplicate_tab(), "重名文件处理")
         tabs.addTab(self._build_shortcut_tab(), "快捷键设置")
         tabs.addTab(self._build_color_tab(), "颜色设计")
+        tabs.addTab(self._build_developer_tab(), "开发者")
         layout.addWidget(tabs, 1)
 
         btn_row = QHBoxLayout()
@@ -731,6 +732,99 @@ class SettingsDialog(QDialog):
             self._sel_label.setText(f"已选中：{', '.join(names)}")
             self._color_btn.setEnabled(True)
 
+    # ── 开发者选项卡 ─────────────────────────────────────────
+
+    def _build_developer_tab(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setSpacing(10)
+
+        # 开发者模式开关
+        self._dev_mode_check = QCheckBox("启用开发者模式")
+        self._dev_mode_check.setToolTip(
+            "开启后可在图片上涂抹选区进行 OCR 文字识别，"
+            "识别结果自动填入文件名输入框。"
+            "修改后的结果将作为训练数据用于模型改进。")
+        layout.addWidget(self._dev_mode_check)
+
+        # OCR 语言设置
+        lang_group = QGroupBox("OCR 语言设置")
+        lang_layout = QHBoxLayout(lang_group)
+        lang_layout.addWidget(QLabel("识别语言："))
+        self._ocr_lang_combo = QComboBox()
+        self._ocr_lang_combo.addItems([
+            "中文简体 + 英文 (默认)",
+            "中文繁体 + 英文",
+            "仅英文",
+            "仅中文简体",
+        ])
+        self._ocr_lang_combo.setToolTip(
+            "选择 EasyOCR 使用的识别语言，更改后需要重启应用生效")
+        lang_layout.addWidget(self._ocr_lang_combo, 1)
+        layout.addWidget(lang_group)
+
+        # 训练数据统计
+        data_group = QGroupBox("训练数据")
+        data_layout = QVBoxLayout(data_group)
+
+        self._sample_count_label = QLabel("已采集样本：计算中...")
+        self._sample_count_label.setObjectName("infoLabel")
+        data_layout.addWidget(self._sample_count_label)
+
+        export_row = QHBoxLayout()
+        export_btn = QPushButton("  导出训练数据为 CSV  ")
+        export_btn.setObjectName("rotateBtn")
+        export_btn.clicked.connect(self._export_training_data)
+        export_row.addWidget(export_btn)
+        export_row.addStretch()
+        data_layout.addLayout(export_row)
+
+        layout.addWidget(data_group)
+
+        # 使用说明
+        info_label = QLabel(
+            "使用说明：\n"
+            "1. 开启开发者模式后，在图片查看器上按住鼠标左键拖动选择文字区域\n"
+            "2. 松开鼠标后自动进行 OCR 识别，结果填入文件名输入框\n"
+            "3. 如果识别有误，直接修改文件名后重命名，系统会记录为训练样本\n"
+            "4. 如果识别正确，直接重命名即可（不会记录训练数据）")
+        info_label.setObjectName("infoLabel")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("padding: 8px; background: rgba(255,255,255,0.05); border-radius: 4px;")
+        layout.addWidget(info_label)
+
+        layout.addStretch()
+
+        # 加载训练数据计数
+        self._refresh_sample_count()
+
+        return w
+
+    def _refresh_sample_count(self):
+        try:
+            from app.training_data import TrainingData
+            td = TrainingData()
+            count = td.count()
+            self._sample_count_label.setText(f"已采集样本：{count} 条")
+        except Exception:
+            self._sample_count_label.setText("已采集样本：0 条")
+
+    def _export_training_data(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出训练数据", "training_data.csv",
+            "CSV 文件 (*.csv)")
+        if not path:
+            return
+        try:
+            from app.training_data import TrainingData
+            td = TrainingData()
+            td.export_csv(path)
+            self._sample_count_label.setText(
+                f"已导出 {td.count()} 条样本到: {path}")
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "导出失败", str(e))
+
     # ── 对话框暗黑/明亮适配 ─────────────────────────────────
 
     def _apply_dialog_theme(self):
@@ -808,6 +902,13 @@ class SettingsDialog(QDialog):
         self._color_preview.load_colors(colors)
         self._refresh_color_table()
 
+        # 开发者模式设置
+        self._dev_mode_check.setChecked(
+            self._settings.value("developer_mode", False, type=bool))
+        ocr_lang = self._settings.value("ocr_languages", "ch_sim,en", type=str)
+        lang_idx = {"ch_sim,en": 0, "ch_tra,en": 1, "en": 2, "ch_sim": 3}.get(ocr_lang, 0)
+        self._ocr_lang_combo.setCurrentIndex(lang_idx)
+
     def _save_and_close(self):
         self._settings.setValue("auto_suffix_enabled",
                                 self._enable_check.isChecked())
@@ -823,4 +924,13 @@ class SettingsDialog(QDialog):
                                 self._auto_contrast_check.isChecked())
         for key, color in self._color_preview.get_colors().items():
             self._settings.setValue(f"color_{key}", color)
+        # 开发者模式设置
+        self._settings.setValue("developer_mode",
+                                self._dev_mode_check.isChecked())
+        lang_map = {
+            0: "ch_sim,en", 1: "ch_tra,en",
+            2: "en", 3: "ch_sim",
+        }
+        self._settings.setValue("ocr_languages",
+                                lang_map.get(self._ocr_lang_combo.currentIndex(), "ch_sim,en"))
         self.accept()

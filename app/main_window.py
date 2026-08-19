@@ -11,6 +11,7 @@ import os
 from app.image_viewer import ImageViewer
 from app.settings_dialog import SettingsDialog, get_shortcuts, event_to_str
 from app.styles import generate_qss
+from app.training_data import TrainingData
 
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
@@ -60,6 +61,11 @@ class MainWindow(QMainWindow):
         self._prefixes = self._settings.value("prefixes", [], type=list)
         self._active_prefix = self._settings.value("active_prefix", "", type=str)
         self._shortcuts: list[QShortcut] = []  # 跟踪全局快捷键
+
+        # OCR 状态追踪
+        self._ocr_pending = False   # 当前输入框内容来自 OCR
+        self._ocr_original = ""     # OCR 识别的原始文字
+        self._training_data = TrainingData()
 
         self._setup_ui()
         self._apply_theme()
@@ -176,7 +182,12 @@ class MainWindow(QMainWindow):
         self._viewer = ImageViewer()
         self._viewer.setMinimumHeight(400)
         self._viewer.image_rotated.connect(self._on_image_rotated)
+        self._viewer.region_ocr_result.connect(self._on_ocr_result)
         right_layout.addWidget(self._viewer, 1)
+
+        # 加载开发者模式设置
+        dev_enabled = self._settings.value("developer_mode", False, type=bool)
+        self._viewer.set_developer_mode(dev_enabled)
 
         # --- 旋转控制行 ---
         rotate_row = QHBoxLayout()
@@ -392,6 +403,20 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(2000, self._check_label.hide)
         self._status_bar.showMessage("旋转并保存完成", 3000)
 
+    # ── OCR 结果处理 ─────────────────────────────────────────
+
+    def _on_ocr_result(self, text: str):
+        """接收 OCR 识别结果，自动填入重命名输入框"""
+        if not text or text.startswith("[识别失败]"):
+            self._status_bar.showMessage(text or "未识别到文字", 4000)
+            return
+        self._ocr_pending = True
+        self._ocr_original = text
+        self._rename_input.setText(text)
+        self._rename_input.selectAll()
+        self._rename_input.setFocus()
+        self._status_bar.showMessage(f"OCR 识别: {text}（修改后重命名将记录为训练数据）", 5000)
+
     # ── 惯用前缀 ─────────────────────────────────────────────
 
     def _refresh_prefix_list(self):
@@ -486,6 +511,9 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self._apply_theme()
             self._setup_shortcuts()
+            # 重新加载开发者模式
+            dev_enabled = self._settings.value("developer_mode", False, type=bool)
+            self._viewer.set_developer_mode(dev_enabled)
 
     def _apply_theme(self):
         """从 QSettings 读取颜色并应用 QSS"""
@@ -570,3 +598,22 @@ class MainWindow(QMainWindow):
 
         self._show_checkmark(new_name)
         self._status_bar.showMessage(f"已重命名: {old_name} → {new_name}", 3000)
+
+        # OCR 训练数据采集：用户修改了 OCR 结果说明识别有误
+        if self._ocr_pending and new_base != self._ocr_original:
+            try:
+                self._training_data.save_sample(
+                    image_path=old_path,
+                    bbox=None,
+                    ocr_result=self._ocr_original,
+                    user_text=new_base,
+                )
+                count = self._training_data.count()
+                self._status_bar.showMessage(
+                    f"已记录训练样本（共 {count} 条）", 3000
+                )
+            except Exception:
+                pass  # 静默失败，不干扰用户操作
+
+        self._ocr_pending = False
+        self._ocr_original = ""
