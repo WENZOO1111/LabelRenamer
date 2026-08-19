@@ -214,13 +214,34 @@ DARK_COLORS = {
 }
 
 
+def _luminance(hex_color: str) -> float:
+    """计算颜色的相对亮度（0=黑，1=白）"""
+    h = hex_color.lstrip("#")
+    if len(h) != 6:
+        return 0.5
+    r, g, b = int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def _contrast_text(bg_hex: str) -> str:
+    """根据背景亮度自动选择黑或白文字"""
+    return "#000000" if _luminance(bg_hex) > 0.5 else "#FFFFFF"
+
+
 def generate_qss(settings) -> str:
     """从 QSettings 读取颜色，生成 QSS 样式表"""
     mode = settings.value("theme_mode", "light", type=str)
+    auto = settings.value("auto_contrast", True, type=bool)
     defaults = LIGHT_COLORS if mode == "light" else DARK_COLORS
     c = {}
     for key, default in defaults.items():
         c[key] = settings.value(f"color_{key}", default, type=str)
+
+    # 自动计算文字颜色：根据背景亮度选择黑/白
+    if auto:
+        c["btn_text"] = _contrast_text(c["btn_bg"])
+        c["accent_text"] = _contrast_text(c["accent"])
+        c["nav_text"] = _contrast_text(c["nav_bg"])
 
     return f"""
 QMainWindow {{ background-color: {c['bg']}; }}

@@ -599,13 +599,19 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(w)
         layout.setSpacing(6)
 
-        # 顶部：模式切换 + 操作按钮
+        # 顶部：模式切换 + 自动对比 + 操作按钮
         top_row = QHBoxLayout()
         top_row.addWidget(QLabel("主题模式："))
         self._mode_combo = QComboBox()
         self._mode_combo.addItems(["明亮模式", "暗黑模式"])
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         top_row.addWidget(self._mode_combo)
+
+        self._auto_contrast_check = QCheckBox("自动计算文字颜色")
+        self._auto_contrast_check.setChecked(True)
+        self._auto_contrast_check.setToolTip(
+            "根据背景亮度自动选择黑/白文字，无需手动调整文字颜色")
+        top_row.addWidget(self._auto_contrast_check)
         top_row.addStretch()
 
         reset_btn = QPushButton("  恢复默认颜色  ")
@@ -794,6 +800,8 @@ class SettingsDialog(QDialog):
         from app.styles import LIGHT_COLORS, DARK_COLORS
         mode = self._settings.value("theme_mode", "light", type=str)
         self._mode_combo.setCurrentIndex(0 if mode == "light" else 1)
+        self._auto_contrast_check.setChecked(
+            self._settings.value("auto_contrast", True, type=bool))
         defaults = LIGHT_COLORS if mode == "light" else DARK_COLORS
         colors = {k: self._settings.value(f"color_{k}", v, type=str)
                   for k, v in defaults.items()}
@@ -811,6 +819,8 @@ class SettingsDialog(QDialog):
                                     btn.get_key_sequence())
         mode = "light" if self._mode_combo.currentIndex() == 0 else "dark"
         self._settings.setValue("theme_mode", mode)
+        self._settings.setValue("auto_contrast",
+                                self._auto_contrast_check.isChecked())
         for key, color in self._color_preview.get_colors().items():
             self._settings.setValue(f"color_{key}", color)
         self.accept()
