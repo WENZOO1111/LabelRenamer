@@ -115,13 +115,17 @@ class ImageViewer(QWidget):
     def set_developer_mode(self, enabled: bool):
         self._developer_mode = enabled
         if enabled:
-            self._overlay.setGeometry(self._label.geometry())
+            self._sync_overlay_geometry()
             self._overlay.show()
             self._overlay.raise_()
         else:
             self._sel_rect = QRect()
             self._selecting = False
             self._overlay.hide()
+
+    def _sync_overlay_geometry(self):
+        """同步覆盖层与 label 完全重合"""
+        self._overlay.setGeometry(0, 0, self._label.width(), self._label.height())
 
     # ── 图片加载 ────────────────────────────────────────────
 
@@ -279,9 +283,9 @@ class ImageViewer(QWidget):
         super().resizeEvent(event)
         if self._pil_image:
             self._update_display()
-        # 同步覆盖层大小
         if self._developer_mode:
-            self._overlay.setGeometry(self._label.geometry())
+            self._sync_overlay_geometry()
+            self._overlay.raise_()
 
     def cleanup(self):
         if self._rotate_worker and self._rotate_worker.isRunning():
