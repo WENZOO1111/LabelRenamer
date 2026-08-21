@@ -39,7 +39,9 @@ class _OverlayLabel(QLabel):
         super().__init__(parent)
         self._viewer = parent_viewer
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.setStyleSheet("background: transparent;")
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setAutoFillBackground(False)
+        self.setStyleSheet("background: transparent; border: none;")
 
     def paintEvent(self, event):
         super().paintEvent(event)
